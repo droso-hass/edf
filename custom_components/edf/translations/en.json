@@ -1,0 +1,15 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Login to your EDF account",
+        "description": "Open the following link in Chrome/Edge, login to your account, open the JS console (CTRL+SHIFT+J), and paste the error starting with 'Failed to launch' in the field below\n\n{url}",
+        "data": {
+          "launch_error_str": "Paste the error here"
+        }
+      }
+    },
+    "error": {},
+    "abort": {}
+  }
+}

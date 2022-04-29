@@ -1,0 +1,14 @@
+{
+  "domain": "edf",
+  "name": "EDF",
+  "documentation": "https://github.com/droso-hass/edf",
+  "issue_tracker": "https://github.com/droso-hass/edf/issues",
+  "dependencies": [],
+  "config_flow": true,
+  "codeowners": ["@drosocode"],
+  "requirements": [
+    "edf-api"
+  ],
+  "version": "1.0.0",
+  "iot_class": "cloud_polling"
+}

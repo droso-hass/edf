@@ -1,0 +1,16 @@
+{
+    "config": {
+      "step": {
+        "user": {
+          "title": "Connexion a votre compte EDF",
+          "description": "Ouvrez le lien suivant dans Chrome/Edge, connectez-vous puis ouvrez la console JS (CTRL+SHIFT+J), et collez l'erreur commencant par 'Failed to launch' dans le champ ci-dessous\n\n{url}",
+          "data": {
+            "launch_error_str": "Collez le message d'erreur ici"
+          }
+        }
+      },
+      "error": {},
+      "abort": {}
+    }
+  }
+  
