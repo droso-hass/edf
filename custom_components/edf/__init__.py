@@ -33,6 +33,7 @@ from .const import (
     STARTUP_MESSAGE,
     ENABLE_LINKYCARD,
     DATA_MONTHLY,
+    DAY_OFFSET
 )
 
 DATA_SCAN_INTERVAL = timedelta(minutes=30)
@@ -115,6 +116,28 @@ class EDFDataUpdateCoordinator(DataUpdateCoordinator):
     async def async_update(self):
         await self._async_update_data()
 
+    async def _get_data(self, year, month):
+        start = datetime(year, month, 1)
+        data = await self.api.get_data(
+            self.bp_id,
+            self.pdl_id,
+            start.strftime("%Y-%m-%d"),
+            (start.replace(day=calendar.monthrange(start.year, start.month)[1])).strftime("%Y-%m-%d"),
+        )
+        if "errorCode" in data:
+            raise UpdateFailed(data.get("errorDescription"))
+        # process data
+        for i in data["dailyLoadCurves"]:
+            self._data[DATA_DAILY][i["day"]] = {
+                DATA_COST: i["totalCost"],
+                DATA_ENERGY: i["totalEnergy"],
+            }
+            for j in i["consumptions"]:
+                self._data[DATA_HOURLY][j["timestamp"]] = {
+                    DATA_COST: j["cost"],
+                    DATA_ENERGY: j["energy"],
+                }
+
     async def _async_update_data(self):
         """Update data via library."""
         try:
@@ -122,35 +145,14 @@ class EDFDataUpdateCoordinator(DataUpdateCoordinator):
                 # fetch data
                 self._data = {DATA_HOURLY: {}, DATA_DAILY: {}, DATA_MONTHLY: {}}
 
-                start = datetime.now() - timedelta(days=3)
+                start = datetime.now() - timedelta(days=DAY_OFFSET)
                 if ENABLE_LINKYCARD:
-                    start = start.replace(day=1)
-
+                    start = datetime.now() - timedelta(days=DAY_OFFSET+14)
                 end = datetime.now() - timedelta(days=1)
-                if end.month != start.month:
-                    end = start.replace(
-                        day=calendar.monthrange(start.year, start.month)[1]
-                    )
 
-                data = await self.api.get_data(
-                    self.bp_id,
-                    self.pdl_id,
-                    start.strftime("%Y-%m-%d"),
-                    end.strftime("%Y-%m-%d"),
-                )
-                if "errorCode" in data:
-                    raise UpdateFailed(data.get("errorDescription"))
-                # process data
-                for i in data["dailyLoadCurves"]:
-                    self._data[DATA_DAILY][i["day"]] = {
-                        DATA_COST: i["totalCost"],
-                        DATA_ENERGY: i["totalEnergy"],
-                    }
-                    for j in i["consumptions"]:
-                        self._data[DATA_HOURLY][j["timestamp"]] = {
-                            DATA_COST: j["cost"],
-                            DATA_ENERGY: j["energy"],
-                        }
+                await self._get_data(start.year,start.month)
+                if end.month != start.month:
+                    await self._get_data(end.year,end.month)
 
                 if ENABLE_LINKYCARD:
                     # get this month, last month, this month last year, last month last year data

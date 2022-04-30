@@ -3,7 +3,6 @@ from .const import *
 from .entity import EDFEntity
 from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
-import calendar
 
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.const import (
@@ -148,17 +147,6 @@ class EDFLinkyCardSensor(EDFEntity, SensorEntity):
             ATTR_LINKYCARD_DAILY_WEEK_COST_HP: "0,0,0,0,0,0,0",
         }
 
-    def round_to_month(self, date, ref_date):
-        if date.month == ref_date.month:
-            return date
-        elif date.month < ref_date.month:
-            return date.replace(month=ref_date.month, day=1)
-        elif date.month > ref_date.month:
-            return date.replace(
-                month=ref_date.month,
-                day=calendar.monthrange(ref_date.year, ref_date.month)[1],
-            )
-
     def evolution(self, y, x):
         if x == 0:
             return 0
@@ -187,52 +175,41 @@ class EDFLinkyCardSensor(EDFEntity, SensorEntity):
         self._attr_extra_state_attributes[ATTR_LINKYCARD_DAILY_WEEK] = ""
         self._attr_extra_state_attributes[ATTR_LINKYCARD_DAILY_WEEK_COST] = ""
         current_week_sum = 0
-        prev = None
         for i in range(DAY_OFFSET, DAY_OFFSET + 7):
-            key = self.round_to_month(
-                datetime.now() - timedelta(days=i), ref_date
-            ).strftime("%Y-%m-%d")
-            if key != prev:
-                prev = key
+            key = (datetime.now() - timedelta(days=i)).strftime("%Y-%m-%d")
+            d = daily.get(key)
+            if d is None:
+                break
+            self._attr_extra_state_attributes[ATTR_LINKYCARD_DAILY].append(
+                d[DATA_ENERGY]
+            )
+            self._attr_extra_state_attributes[ATTR_LINKYCARD_DAILY_WEEK] += (
+                key + ","
+            )
+            self._attr_extra_state_attributes[ATTR_LINKYCARD_DAILY_WEEK_COST] += (
+                str(d[DATA_COST]) + ","
+            )
 
-                d = daily.get(key)
-                if d is None:
-                    break
-                self._attr_extra_state_attributes[ATTR_LINKYCARD_DAILY].append(
-                    d[DATA_ENERGY]
-                )
-                self._attr_extra_state_attributes[ATTR_LINKYCARD_DAILY_WEEK] += (
-                    key + ","
-                )
-                self._attr_extra_state_attributes[ATTR_LINKYCARD_DAILY_WEEK_COST] += (
-                    str(d[DATA_COST]) + ","
-                )
-
-                if i == DAY_OFFSET + 1:  # yesterday
+            if i == DAY_OFFSET + 1:  # yesterday
+                self._attr_extra_state_attributes[
+                    ATTR_LINKYCARD_YESTERDAY_LAST_YEAR
+                ] = d[DATA_ENERGY]
+                self._attr_extra_state_attributes[
+                    ATTR_LINKYCARD_YESTERDAY_EVOLUTION
+                ] = self.evolution(
+                    self._attr_extra_state_attributes[ATTR_LINKYCARD_YESTERDAY],
                     self._attr_extra_state_attributes[
                         ATTR_LINKYCARD_YESTERDAY_LAST_YEAR
-                    ] = d[DATA_ENERGY]
-                    self._attr_extra_state_attributes[
-                        ATTR_LINKYCARD_YESTERDAY_EVOLUTION
-                    ] = self.evolution(
-                        self._attr_extra_state_attributes[ATTR_LINKYCARD_YESTERDAY],
-                        self._attr_extra_state_attributes[
-                            ATTR_LINKYCARD_YESTERDAY_LAST_YEAR
-                        ],
-                    )
-                current_week_sum += d[DATA_ENERGY]
+                    ],
+                )
+            current_week_sum += d[DATA_ENERGY]
 
         # update last week results
-        prev = None
         last_week_sum = 0
         for i in range(DAY_OFFSET + 7, DAY_OFFSET + 14):
-            key = self.round_to_month(
-                datetime.now() - timedelta(days=i), ref_date
-            ).strftime("%Y-%m-%d")
-            if key != prev:
-                prev = key
-                if key in daily:
-                    last_week_sum += daily[key][DATA_ENERGY]
+            key = (datetime.now() - timedelta(days=i)).strftime("%Y-%m-%d")
+            if key in daily:
+                last_week_sum += daily[key][DATA_ENERGY]
         self._attr_extra_state_attributes[
             ATTR_LINKYCARD_CURRENT_WEEK
         ] = current_week_sum
