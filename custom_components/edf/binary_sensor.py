@@ -1,8 +1,23 @@
 """Binary sensor platform for EDF Integration"""
-from homeassistant.components.binary_sensor import BinarySensorEntity, BinarySensorDeviceClass
+from homeassistant.components.binary_sensor import (
+    BinarySensorEntity,
+    BinarySensorDeviceClass,
+)
 
-from .const import CONF_INSEE_CODE, DOMAIN, ATTR_OUTAGE_DESC, ATTR_OUTAGE_END, ATTR_OUTAGE_GRID, ATTR_OUTAGE_HOMES, ATTR_OUTAGE_START, ATTR_OUTAGE_STATUS, ATTR_OUTAGE_TITLE, GRID_COORDINATOR
+from .const import (
+    CONF_INSEE_CODE,
+    DOMAIN,
+    ATTR_OUTAGE_DESC,
+    ATTR_OUTAGE_END,
+    ATTR_OUTAGE_GRID,
+    ATTR_OUTAGE_HOMES,
+    ATTR_OUTAGE_START,
+    ATTR_OUTAGE_STATUS,
+    ATTR_OUTAGE_TITLE,
+    GRID_COORDINATOR,
+)
 from .entity import EDFEntity
+
 
 async def async_setup_entry(
     hass,
@@ -11,13 +26,12 @@ async def async_setup_entry(
 ) -> None:
     """Setup binary_sensor platform."""
     coordinator = hass.data[DOMAIN][entry.entry_id][GRID_COORDINATOR]
-    async_add_entities(
-        [EDFBinarySensor(coordinator, entry)], True
-    )
+    async_add_entities([EDFBinarySensor(coordinator, entry)], True)
 
 
 class EDFBinarySensor(EDFEntity, BinarySensorEntity):
     """EDF binary_sensor class."""
+
     def __init__(
         self,
         coordinator,
@@ -61,7 +75,7 @@ class EDFBinarySensor(EDFEntity, BinarySensorEntity):
                     ATTR_OUTAGE_HOMES: data.number_affected_homes,
                     ATTR_OUTAGE_START: data.outage_start_date,
                     ATTR_OUTAGE_END: data.outage_end_date,
-                    ATTR_OUTAGE_STATUS: data.status
+                    ATTR_OUTAGE_STATUS: data.status,
                 }
             )
         else:
@@ -73,7 +87,7 @@ class EDFBinarySensor(EDFEntity, BinarySensorEntity):
                     ATTR_OUTAGE_HOMES: 0,
                     ATTR_OUTAGE_START: "",
                     ATTR_OUTAGE_END: "",
-                    ATTR_OUTAGE_STATUS: ""
+                    ATTR_OUTAGE_STATUS: "",
                 }
             )
 

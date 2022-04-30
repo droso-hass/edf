@@ -4,6 +4,7 @@ Custom integration for EDF for Home Assistant.
 import asyncio
 import logging
 from datetime import timedelta, datetime
+import calendar
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import Config, HomeAssistant
@@ -30,6 +31,8 @@ from .const import (
     PLATFORMS,
     SENSOR,
     STARTUP_MESSAGE,
+    ENABLE_LINKYCARD,
+    DATA_MONTHLY,
 )
 
 DATA_SCAN_INTERVAL = timedelta(minutes=30)
@@ -73,7 +76,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
 
     hass.data[DOMAIN][entry.entry_id] = {
         GRID_COORDINATOR: grid_coordinator,
-        DATA_COORDINATOR: data_coordinator
+        DATA_COORDINATOR: data_coordinator,
     }
 
     if entry.options.get(BINARY_SENSOR, True):
@@ -114,19 +117,30 @@ class EDFDataUpdateCoordinator(DataUpdateCoordinator):
 
     async def _async_update_data(self):
         """Update data via library."""
-        _LOGGER.info("edf update")
         try:
             if self._next_update is None or datetime.now() >= self._next_update:
                 # fetch data
-                start = (datetime.now() - timedelta(days=3)).strftime("%Y-%m-%d")
-                end = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
-                data = await self.api.get_data(self.bp_id, self.pdl_id, start, end)
-                
+                self._data = {DATA_HOURLY: {}, DATA_DAILY: {}, DATA_MONTHLY: {}}
+
+                start = datetime.now() - timedelta(days=3)
+                if ENABLE_LINKYCARD:
+                    start = start.replace(day=1)
+
+                end = datetime.now() - timedelta(days=1)
+                if end.month != start.month:
+                    end = start.replace(
+                        day=calendar.monthrange(start.year, start.month)[1]
+                    )
+
+                data = await self.api.get_data(
+                    self.bp_id,
+                    self.pdl_id,
+                    start.strftime("%Y-%m-%d"),
+                    end.strftime("%Y-%m-%d"),
+                )
                 if "errorCode" in data:
                     raise UpdateFailed(data.get("errorDescription"))
-
                 # process data
-                self._data = {DATA_HOURLY: {}, DATA_DAILY: {}}
                 for i in data["dailyLoadCurves"]:
                     self._data[DATA_DAILY][i["day"]] = {
                         DATA_COST: i["totalCost"],
@@ -137,11 +151,18 @@ class EDFDataUpdateCoordinator(DataUpdateCoordinator):
                             DATA_COST: j["cost"],
                             DATA_ENERGY: j["energy"],
                         }
+
+                if ENABLE_LINKYCARD:
+                    # get this month, last month, this month last year, last month last year data
+                    pass
+
                 # set next update to the next day at 11 AM
-                self._next_update = (
-                    datetime.now() + timedelta(days=1)
-                ).replace(hour=11)
-                _LOGGER.info("next update: "+self._next_update.strftime("%Y-%m-%dT%H:%M:%SZ"))
+                self._next_update = (datetime.now() + timedelta(days=1)).replace(
+                    hour=11
+                )
+                _LOGGER.info(
+                    "next update: " + self._next_update.strftime("%Y-%m-%dT%H:%M:%SZ")
+                )
 
             return self._data
         except UpdateFailed:
@@ -177,7 +198,10 @@ class EDFGridDataUpdateCoordinator(DataUpdateCoordinator):
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Handle removal of an entry."""
-    platforms = hass.data[DOMAIN][entry.entry_id][DATA_COORDINATOR].platforms + hass.data[DOMAIN][entry.entry_id][GRID_COORDINATOR].platforms
+    platforms = (
+        hass.data[DOMAIN][entry.entry_id][DATA_COORDINATOR].platforms
+        + hass.data[DOMAIN][entry.entry_id][GRID_COORDINATOR].platforms
+    )
     unloaded = all(
         await asyncio.gather(
             *[
