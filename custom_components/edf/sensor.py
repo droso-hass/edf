@@ -26,10 +26,10 @@ async def async_setup_entry(
     """Setup sensor platform."""
     coordinator = hass.data[DOMAIN][entry.entry_id][DATA_COORDINATOR]
     e = [
-        EDFDashSensor(coordinator, entry, True, True),
-        EDFDashSensor(coordinator, entry, True, False),
-        EDFDashSensor(coordinator, entry, False, True),
-        EDFDashSensor(coordinator, entry, False, False),
+        EDFDashSensor(coordinator, entry, True),
+        EDFDashMonthSensor(coordinator, entry, True),
+        EDFDashSensor(coordinator, entry, False),
+        EDFDashMonthSensor(coordinator, entry, False),
     ]
     if ENABLE_LINKYCARD:
         e.append(EDFLinkyCardSensor(coordinator, entry))
@@ -39,16 +39,13 @@ async def async_setup_entry(
 class EDFDashSensor(EDFEntity, SensorEntity):
     """EDF Timestamp Sensor class."""
 
-    def __init__(self, coordinator, config_entry, energy=True, month=False):
+    def __init__(self, coordinator, config_entry, energy=True):
         super().__init__(coordinator, config_entry)
 
         self._energy = energy
-        self._month = month
         self._attr_extra_state_attributes = {ATTR_UPDATE_DATE: None}
 
-        suffix = (
-            "_elec_" + ("energy" if energy else "cost") + ("_month" if month else "")
-        )
+        suffix = "_elec_" + ("energy" if energy else "cost")
         self._attr_unique_id = self.config_entry.entry_id + suffix
         self._attr_name = "edf_" + self.config_entry.data[CONF_PDL] + suffix
         self._attr_state_class = STATE_CLASS_TOTAL
@@ -61,16 +58,21 @@ class EDFDashSensor(EDFEntity, SensorEntity):
             self._attr_unit_of_measurement = CURRENCY_EURO
 
         if self._attr_native_value is None:
-            self._attr_native_value = 0
+            s = 0
+            n = datetime.now() - timedelta(days=DAY_OFFSET)
+            dt = n.replace(hour=0, minute=0, second=0, microsecond=0)
+            data = self.coordinator.data[DATA_HOURLY]
+            while dt < n:
+                k = dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+                if k not in data:
+                    break
+                s += data[k][DATA_ENERGY if self._energy else DATA_COST]
+                dt += timedelta(minutes=30)
+            self._attr_native_value = s
 
     @property
     def last_reset(self):
-        if self._month:
-            return datetime.now().replace(
-                day=1, hour=0, minute=0, second=0, microsecond=0
-            )
-        else:
-            return datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        return datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
 
     @callback
     def _handle_coordinator_update(self) -> None:
@@ -78,10 +80,7 @@ class EDFDashSensor(EDFEntity, SensorEntity):
 
         key = datetime.now() - timedelta(days=DAY_OFFSET)
         key = key.replace(second=0, microsecond=0)
-        if key.minute >= 45:
-            key = key.replace(minute=0) + timedelta(hours=1)
-        else:
-            key = key.replace(minute=(30 if key.minute > 15 and key.minute < 45 else 0))
+        key = key.replace(minute=(30 if key.minute >= 30 else 0))
         key_str = key.strftime("%Y-%m-%dT%H:%M:%SZ")
 
         if key_str not in data:
@@ -91,16 +90,67 @@ class EDFDashSensor(EDFEntity, SensorEntity):
 
         d = data[key_str][DATA_ENERGY if self._energy else DATA_COST]
 
-        if (
-            (not self._month or (self._month and key.day == 1))
-            and key.hour == 0
-            and key.minute == 0
-        ):
+        if key.hour == 0 and key.minute == 0:
             self._attr_native_value = d
         else:
             self._attr_native_value += d
 
         self._attr_extra_state_attributes[ATTR_UPDATE_DATE] = key
+
+        self.async_write_ha_state()
+
+
+class EDFDashMonthSensor(EDFEntity, SensorEntity):
+    """EDF Timestamp Sensor class."""
+
+    def __init__(self, coordinator, config_entry, energy=True):
+        super().__init__(coordinator, config_entry)
+
+        self._energy = energy
+        self._attr_extra_state_attributes = {ATTR_UPDATE_DATE: None}
+
+        suffix = "_elec_" + ("energy" if energy else "cost") + "_month"
+        self._attr_unique_id = self.config_entry.entry_id + suffix
+        self._attr_name = "edf_" + self.config_entry.data[CONF_PDL] + suffix
+        self._attr_state_class = STATE_CLASS_TOTAL
+
+        if energy:
+            self._attr_device_class = DEVICE_CLASS_ENERGY
+            self._attr_unit_of_measurement = ENERGY_KILO_WATT_HOUR
+        else:
+            self._attr_device_class = DEVICE_CLASS_MONETARY
+            self._attr_unit_of_measurement = CURRENCY_EURO
+
+        if self._attr_native_value is None:
+            data = self.coordinator.data[DATA_MONTHLY]
+            k = (datetime.now() - timedelta(days=DAY_OFFSET)).strftime("%Y-%m")
+            if k not in data:
+                self._attr_native_value = 0
+            else:
+                self._attr_native_value = data[k][
+                    (DATA_ENERGY if self._energy else DATA_COST)
+                ]
+
+    @property
+    def last_reset(self):
+        return (datetime.now() - timedelta(days=DAY_OFFSET)).replace(
+            day=1, hour=0, minute=0, second=0, microsecond=0
+        )
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        data = self.coordinator.data[DATA_MONTHLY]
+        key_str = (datetime.now() - timedelta(days=DAY_OFFSET)).strftime("%Y-%m")
+        if key_str not in data:
+            _LOGGER.warn("data not found for key:" + key_str)
+            _LOGGER.debug(data)
+            return
+
+        self._attr_native_value = data[key_str][
+            DATA_ENERGY if self._energy else DATA_COST
+        ]
+
+        self._attr_extra_state_attributes[ATTR_UPDATE_DATE] = key_str
 
         self.async_write_ha_state()
 
@@ -158,14 +208,17 @@ class EDFLinkyCardSensor(EDFEntity, SensorEntity):
         monthly = self.coordinator.data[DATA_MONTHLY]
 
         ref_date = datetime.now() - timedelta(days=DAY_OFFSET)
+        current_month = ref_date.strftime("%Y-%m")
 
-        # update latest day (now-3) energy and cost
+        # update latest month (now-3) energy and cost
+        if current_month in monthly:
+            self._attr_native_value = monthly[current_month][DATA_ENERGY]
+            self._attr_extra_state_attributes[ATTR_LINKYCARD_DAILY_COST] = monthly[
+                current_month
+            ][DATA_COST]
+
         key = ref_date.strftime("%Y-%m-%d")
         if key in daily:
-            self._attr_native_value = daily[key][DATA_ENERGY]
-            self._attr_extra_state_attributes[ATTR_LINKYCARD_DAILY_COST] = daily[key][
-                DATA_COST
-            ]
             self._attr_extra_state_attributes[ATTR_LINKYCARD_YESTERDAY] = daily[key][
                 DATA_ENERGY
             ]
@@ -183,9 +236,7 @@ class EDFLinkyCardSensor(EDFEntity, SensorEntity):
             self._attr_extra_state_attributes[ATTR_LINKYCARD_DAILY].append(
                 d[DATA_ENERGY]
             )
-            self._attr_extra_state_attributes[ATTR_LINKYCARD_DAILY_WEEK] += (
-                key + ","
-            )
+            self._attr_extra_state_attributes[ATTR_LINKYCARD_DAILY_WEEK] += key + ","
             self._attr_extra_state_attributes[ATTR_LINKYCARD_DAILY_WEEK_COST] += (
                 str(d[DATA_COST]) + ","
             )
@@ -240,7 +291,6 @@ class EDFLinkyCardSensor(EDFEntity, SensorEntity):
             self._attr_extra_state_attributes[ATTR_LINKYCARD_LAST_MONTH_LAST_YEAR],
         )
 
-        current_month = ref_date.strftime("%Y-%m")
         if current_month in monthly:
             self._attr_extra_state_attributes[ATTR_LINKYCARD_CURRENT_MONTH] = monthly[
                 current_month

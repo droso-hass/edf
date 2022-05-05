@@ -2,9 +2,11 @@
 Custom integration for EDF for Home Assistant.
 """
 import asyncio
+import aiohttp
 import logging
 from datetime import timedelta, datetime
 import calendar
+from dateutil.relativedelta import relativedelta
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import Config, HomeAssistant
@@ -60,8 +62,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
     bp = entry.data.get(CONF_BUSINESS_PARTNER)
     insee = entry.data.get(CONF_INSEE_CODE)
 
-    session = async_get_clientsession(hass)
-    client = EDFApi(session, access_token, refresh_token, token_expiration)
+    #session = async_get_clientsession(hass)
+    session = aiohttp.ClientSession(connector=aiohttp.TCPConnector(limit=1, force_close=True))
+    client = EDFApi(session, access_token, refresh_token, token_expiration, bp, pdl, insee)
 
     grid_coordinator = EDFGridDataUpdateCoordinator(
         hass, client=client, pdl_id=pdl, insee_code=insee
@@ -118,9 +121,7 @@ class EDFDataUpdateCoordinator(DataUpdateCoordinator):
 
     async def _get_data(self, year, month):
         start = datetime(year, month, 1)
-        data = await self.api.get_data(
-            self.bp_id,
-            self.pdl_id,
+        data = await self.api.get_elec_daily_data(
             start.strftime("%Y-%m-%d"),
             (start.replace(day=calendar.monthrange(start.year, start.month)[1])).strftime("%Y-%m-%d"),
         )
@@ -156,7 +157,12 @@ class EDFDataUpdateCoordinator(DataUpdateCoordinator):
 
                 if ENABLE_LINKYCARD:
                     # get this month, last month, this month last year, last month last year data
-                    pass
+                    monthly = await self.api.get_elec_monthly_data((start - relativedelta(years=1) - relativedelta(months=1)).strftime("%Y-%m"), (end+relativedelta(months=1)).strftime("%Y-%m"))
+                    for i in monthly["monthlyConsumptions"]:
+                        self._data[DATA_MONTHLY][i["endTs"][0:7]] = {
+                            DATA_COST: i["consumption"]["cost"],
+                            DATA_ENERGY: i["consumption"]["energy"],
+                        }
 
                 # set next update to the next day at 11 AM
                 self._next_update = (datetime.now() + timedelta(days=1)).replace(
@@ -193,7 +199,7 @@ class EDFGridDataUpdateCoordinator(DataUpdateCoordinator):
     async def _async_update_data(self):
         """Update data via library."""
         try:
-            return await self.api.get_info(self.insee_code, self.pdl_id)
+            return await self.api.get_grid_info()
         except Exception as exception:
             raise UpdateFailed() from exception
 

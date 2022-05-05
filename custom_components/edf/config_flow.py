@@ -3,7 +3,7 @@ from typing import Any, Dict, Optional
 import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.const import CONF_URL
-from aiohttp import ClientSession
+import aiohttp
 import re
 
 from edf_api import EDFAuth
@@ -31,7 +31,7 @@ class EDFFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
 
     def __init__(self):
         """Initialize."""
-        self._auth = EDFAuth(ClientSession())
+        self._auth = EDFAuth(aiohttp.ClientSession(connector=aiohttp.TCPConnector(limit=1, force_close=True)))
         self.data = {}
 
     async def async_step_user(self, user_input: Optional[Dict[str, Any]] = None):
